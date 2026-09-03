@@ -59,7 +59,7 @@ export default function Profile() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-background pt-10">
+    <SafeAreaView className="flex-1 bg-background pt-3">
       <View className="px-5 pt-4">
         <Text className="font-display text-2xl text-primary">Your profile</Text>
 

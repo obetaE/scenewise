@@ -85,7 +85,7 @@ export default function Browse() {
   };
 
   return (
-    <SafeAreaView className="flex-1 pt-10 bg-background">
+    <SafeAreaView className="flex-1 pt-5 bg-background">
       <View className="px-5 pt-4">
         <Text className="font-display text-2xl text-primary">Browse</Text>
         <View className="mt-4 flex-row items-center gap-2 rounded-2xl border border-border bg-secondary/50 px-4 py-3">

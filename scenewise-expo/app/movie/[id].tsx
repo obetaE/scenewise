@@ -256,7 +256,12 @@ export default function MovieDetail() {
           <View className="mt-6 px-5">
             <Text className="text-sm font-sans-semibold text-foreground">Where to watch</Text>
             <View className="mt-2 flex-row flex-wrap gap-2">
-              {[...providers.flatrate, ...providers.rent, ...providers.buy].map((name) => (
+              {/* A provider often appears in more than one category — most
+                  services that rent a title also sell it — so dedupe before
+                  rendering, otherwise the same chip shows twice. */}
+              {Array.from(
+                new Set([...providers.flatrate, ...providers.rent, ...providers.buy]),
+              ).map((name) => (
                 <View
                   key={name}
                   className="rounded-full border border-border bg-secondary/50 px-3 py-1.5"

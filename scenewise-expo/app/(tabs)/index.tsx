@@ -21,7 +21,7 @@ export default function Home() {
   const lowCommitment = movies.filter((m) => m.intensity <= 3);
 
   return (
-    <SafeAreaView className="flex-1 pt-10 bg-background">
+    <SafeAreaView className="flex-1 pt-2 bg-background">
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 40 }}>
         {/* Header */}
         <View className="flex-row items-center justify-between px-5 pt-4">
