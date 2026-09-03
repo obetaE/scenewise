@@ -1,0 +1,25 @@
+// Mirrors the `colors` block in tailwind.config.js — the single source of truth for
+// hex values used where NativeWind className can't reach (icon `color`, `tintColor`, SVG `stroke`, etc).
+export const colors = {
+  background: "#201c19",
+  foreground: "#fafaf8",
+  card: "#2b2723",
+  cardForeground: "#fafaf8",
+  popover: "#282420",
+  primary: "#d9b96a",
+  primaryForeground: "#3a2e16",
+  primaryGlow: "#e9cf8f",
+  secondary: "#332e28",
+  secondaryForeground: "#f5f4f2",
+  muted: "#312c27",
+  mutedForeground: "#b7ac9c",
+  accent: "#94e8bf",
+  accentForeground: "#1a3327",
+  warning: "#e2a468",
+  warningForeground: "#3a2410",
+  destructive: "#d0574a",
+  destructiveForeground: "#fafaf8",
+  border: "rgba(255,255,255,0.1)",
+  input: "rgba(255,255,255,0.14)",
+  ring: "#d9b96a",
+} as const;

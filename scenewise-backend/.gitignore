@@ -1,0 +1,27 @@
+# Compiled output
+dist/
+build/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment files (you already have .env, but add a comment)
+.env
+.env.local
+.env.*.local
+
+# OS files (good practice)
+.DS_Store
+Thumbs.db
+
+# Editor/IDE folders (if any)
+.vscode/
+.idea/
+
+# Optional: if you use a specific uploads folder for receipts
+uploads/
