@@ -6,12 +6,15 @@ import {
   Pressable,
   Image,
   FlatList,
+  ScrollView,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Search as SearchIcon, Star } from "lucide-react-native";
 import { api, type TmdbMovieSummary } from "@/lib/api";
+import { ErrorBanner } from "@/components/ErrorBanner";
+import { sampleTrending } from "@/lib/cards";
 import { colors } from "@/lib/theme";
 
 export default function Browse() {
@@ -21,6 +24,7 @@ export default function Browse() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [navigatingId, setNavigatingId] = useState<number | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   const loadTrending = useCallback(async () => {
     setLoading(true);
@@ -28,8 +32,13 @@ export default function Browse() {
     try {
       const { results } = await api.trendingMovies();
       setResults(results);
+      setUsingFallback(false);
     } catch (e: any) {
+      // Fall back to the bundled sample titles so the screen stays usable
+      // offline; the banner says why they're there.
       setError(e.message || "Couldn't load trending movies");
+      setResults([]);
+      setUsingFallback(true);
     } finally {
       setLoading(false);
     }
@@ -41,8 +50,11 @@ export default function Browse() {
     try {
       const { results } = await api.searchMovies(term);
       setResults(results);
+      setUsingFallback(false);
     } catch (e: any) {
       setError(e.message || "Search failed");
+      setResults([]);
+      setUsingFallback(true);
     } finally {
       setLoading(false);
     }
@@ -111,18 +123,40 @@ export default function Browse() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color={colors.primary} />
         </View>
-      ) : error ? (
-        <View className="flex-1 items-center justify-center gap-4 px-8">
-          <Text className="text-center text-sm text-destructive">{error}</Text>
-          <Pressable
-            onPress={retry}
-            accessibilityRole="button"
-            accessibilityLabel="Retry"
-            className="rounded-xl border border-border bg-secondary/50 px-5 py-2.5 active:opacity-70"
-          >
-            <Text className="font-sans-medium text-sm text-foreground">Try again</Text>
-          </Pressable>
-        </View>
+      ) : usingFallback ? (
+        // Offline: keep the sample titles on screen with an explanatory
+        // banner, rather than replacing the whole tab with an error.
+        <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+          <ErrorBanner message={error || "Couldn't reach Scenewise"} onRetry={retry} />
+          <View className="mt-4 gap-3 px-5">
+            {sampleTrending.map((m) => (
+              <Pressable
+                key={m.key}
+                onPress={() => m.sampleId && router.push(`/title/${m.sampleId}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`${m.title}, ${m.year}`}
+                className="flex-row items-center gap-3.5 rounded-2xl border border-border bg-card/70 p-3 active:opacity-70"
+              >
+                <Image
+                  source={m.poster}
+                  className="h-[92px] w-[62px] rounded-xl"
+                  resizeMode="cover"
+                />
+                <View className="min-w-0 flex-1">
+                  <Text className="font-sans-medium text-foreground" numberOfLines={2}>
+                    {m.title}
+                  </Text>
+                  <Text className="mt-0.5 text-xs text-muted-foreground">
+                    {[m.runtimeLabel, m.year, m.genres[0]].filter(Boolean).join(" · ")}
+                  </Text>
+                  <Text className="mt-1.5 text-[11px] text-muted-foreground">
+                    Sample title
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={results}

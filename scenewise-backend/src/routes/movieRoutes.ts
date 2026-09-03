@@ -7,6 +7,9 @@ import {
   getPopularMovies,
   getMovieDetail,
   getWatchProviders,
+  getHomeFeed,
+  discoverMovies,
+  getMovieExtras,
 } from "../lib/tmdb.ts";
 
 const router = express.Router();
@@ -45,6 +48,45 @@ router.get("/popular", requireDeviceId, async (req, res) => {
   } catch (error) {
     console.error("Error fetching popular movies:", error);
     res.status(502).json({ message: "Popular movies are temporarily unavailable" });
+  }
+});
+
+// GET /api/movie/home — the whole home screen in one request: the trending
+// row plus short "low-commitment" picks, each enriched with real runtime and
+// age certification. Cached upstream, so this is cheap to re-hit.
+//
+// Declared before /:id so those literal paths aren't swallowed by the param route.
+router.get("/home", requireDeviceId, async (req, res) => {
+  try {
+    const feed = await getHomeFeed(String(req.query.region || "US"));
+    res.json(feed);
+  } catch (error) {
+    console.error("Error building home feed:", error);
+    res.status(502).json({ message: "Home feed is temporarily unavailable" });
+  }
+});
+
+// GET /api/movie/discover?genres=Comedy,Drama&maxRuntime=100&minRating=6
+// Backs the filter sheet and the watch-decision quiz.
+router.get("/discover", requireDeviceId, async (req, res) => {
+  try {
+    const q = req.query;
+    const list = (v: unknown) => String(v || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+    const results = await discoverMovies({
+      genres: list(q.genres),
+      maxRuntime: q.maxRuntime ? Number(q.maxRuntime) : undefined,
+      minRuntime: q.minRuntime ? Number(q.minRuntime) : undefined,
+      minRating: q.minRating ? Number(q.minRating) : undefined,
+      certification: q.certification ? String(q.certification) : undefined,
+      sortBy: q.sortBy ? String(q.sortBy) : undefined,
+      page: q.page ? Number(q.page) : undefined,
+    });
+
+    res.json({ results });
+  } catch (error) {
+    console.error("Error running discover:", error);
+    res.status(502).json({ message: "Discover is temporarily unavailable" });
   }
 });
 
@@ -113,6 +155,21 @@ router.get("/:id/watch-providers", requireDeviceId, async (req, res) => {
   } catch (error) {
     console.error("Error fetching watch providers:", error);
     res.status(502).json({ message: "Watch providers are temporarily unavailable" });
+  }
+});
+
+// GET /api/movie/:id/extras — runtime, age certification and the trailer.
+// One TMDB call behind the scenes (append_to_response), cached for an hour.
+router.get("/:id/extras", requireDeviceId, async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) return res.status(404).json({ message: "Movie not found" });
+
+    const extras = await getMovieExtras(movie.tmdbId, String(req.query.region || "US"));
+    res.json({ extras });
+  } catch (error) {
+    console.error("Error fetching movie extras:", error);
+    res.status(502).json({ message: "Movie extras are temporarily unavailable" });
   }
 });
 

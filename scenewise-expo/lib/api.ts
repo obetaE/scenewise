@@ -68,6 +68,34 @@ export type TmdbMovieSummary = {
   tmdbVoteAverage: number;
 };
 
+// A TMDB summary plus the extras we genuinely have a source for. Used by
+// the home feed, discover results and the filter sheet.
+export type MovieCard = TmdbMovieSummary & {
+  runtime: number | null;
+  certification: string | null;
+};
+
+export type HomeFeed = {
+  trending: MovieCard[];
+  lowCommitment: MovieCard[];
+};
+
+export type MovieExtras = {
+  runtime: number | null;
+  certification: string | null;
+  trailerKey: string | null;
+  trailerName: string | null;
+};
+
+export type DiscoverFilters = {
+  genres?: string[];
+  maxRuntime?: number;
+  minRuntime?: number;
+  minRating?: number;
+  certification?: string;
+  sortBy?: string;
+};
+
 // One shape for both sources: reviews written in this app and reviews
 // pulled live from TMDB. `source` is what the UI tags each card with.
 export type Review = {
@@ -98,12 +126,28 @@ export const api = {
   popularMovies: (page = 1) =>
     request<{ results: TmdbMovieSummary[] }>(`/movie/popular?page=${page}`),
 
+  // The whole home screen in one request, enriched server-side.
+  homeFeed: () => request<HomeFeed>("/movie/home"),
+
+  // Backs both the filter sheet and the watch-decision quiz.
+  discover: (filters: DiscoverFilters) => {
+    const q = new URLSearchParams();
+    if (filters.genres?.length) q.set("genres", filters.genres.join(","));
+    if (filters.maxRuntime) q.set("maxRuntime", String(filters.maxRuntime));
+    if (filters.minRuntime) q.set("minRuntime", String(filters.minRuntime));
+    if (filters.minRating) q.set("minRating", String(filters.minRating));
+    if (filters.certification) q.set("certification", filters.certification);
+    if (filters.sortBy) q.set("sortBy", filters.sortBy);
+    return request<{ results: MovieCard[] }>(`/movie/discover?${q.toString()}`);
+  },
+
   // -- Catalog (our DB, cached from TMDB on first touch) --
   registerMovie: (tmdbId: number) =>
     request<{ movie: Movie }>("/movie", { method: "POST", body: { tmdbId } }),
   getMovie: (id: string) => request<{ movie: Movie; likedByMe: boolean }>(`/movie/${id}`),
   toggleLike: (id: string) =>
     request<{ liked: boolean; likesCount: number }>(`/movie/${id}/like`, { method: "POST" }),
+  movieExtras: (id: string) => request<{ extras: MovieExtras }>(`/movie/${id}/extras`),
   watchProviders: (id: string) =>
     request<{ providers: { link: string | null; flatrate: string[]; rent: string[]; buy: string[] } }>(
       `/movie/${id}/watch-providers`,

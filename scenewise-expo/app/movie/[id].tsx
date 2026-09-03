@@ -10,8 +10,10 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ArrowLeft, Heart, Clock, Star, ExternalLink } from "lucide-react-native";
-import { api, type Movie, type Review, type ShelfEntry } from "@/lib/api";
+import { ArrowLeft, Heart, Star, ExternalLink, Play } from "lucide-react-native";
+import * as WebBrowser from "expo-web-browser";
+import { api, type Movie, type Review, type ShelfEntry, type MovieExtras } from "@/lib/api";
+import { Tag } from "@/components/Tag";
 import { RatingStars } from "@/components/RatingStars";
 import { ReviewCard } from "@/components/ReviewCard";
 
@@ -38,6 +40,7 @@ export default function MovieDetail() {
     rent: string[];
     buy: string[];
   } | null>(null);
+  const [extras, setExtras] = useState<MovieExtras | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [myRating, setMyRating] = useState(0);
@@ -58,8 +61,10 @@ export default function MovieDetail() {
       setTotalReviews(totalReviews);
       setReviewPage(1);
 
-      // Watch providers is a nice-to-have — don't block the screen on it.
+      // Providers and extras (trailer, certification) are nice-to-haves —
+      // don't block the screen on either.
       api.watchProviders(id).then(({ providers }) => setProviders(providers)).catch(() => {});
+      api.movieExtras(id).then(({ extras }) => setExtras(extras)).catch(() => {});
     } catch (e) {
       console.error(e);
     } finally {
@@ -181,6 +186,11 @@ export default function MovieDetail() {
                 {movie.releaseDate?.slice(0, 4) || "—"}
                 {movie.runtime ? ` · ${movie.runtime}m` : ""}
               </Text>
+              {extras?.certification ? (
+                <Tag variant="neutral" className="px-2 py-0.5">
+                  {extras.certification}
+                </Tag>
+              ) : null}
               {movie.likesCount > 0 && (
                 <View className="flex-row items-center gap-1">
                   <Heart size={11} color="#d0574a" fill="#d0574a" />
@@ -188,6 +198,24 @@ export default function MovieDetail() {
                 </View>
               )}
             </View>
+
+            {extras?.trailerKey ? (
+              <Pressable
+                onPress={() =>
+                  WebBrowser.openBrowserAsync(
+                    `https://www.youtube.com/watch?v=${extras.trailerKey}`,
+                  )
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Watch trailer"
+                className="mt-3 flex-row items-center gap-2 self-start rounded-full bg-primary px-4 py-2.5 active:opacity-80"
+              >
+                <Play size={13} color="#3a2e16" fill="#3a2e16" />
+                <Text className="text-xs font-sans-semibold text-primary-foreground">
+                  Watch trailer
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
