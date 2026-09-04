@@ -6,28 +6,56 @@ import { getDeviceId } from "./deviceId";
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:3001/api";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** True when the request timed out rather than being refused or rejected. */
+  timedOut: boolean;
+  constructor(message: string, status: number, timedOut = false) {
     super(message);
     this.status = status;
+    this.timedOut = timedOut;
   }
 }
 
+// Free hosting tiers (Render's included) suspend a service after a period of
+// inactivity and take 30-50s to boot again. Without a timeout, fetch would
+// simply hang for that whole cold start, leaving the UI on a spinner with no
+// way to tell "slow" from "broken". Callers use a short first attempt to
+// detect the cold start, then retry with a long one while the server wakes.
+export const DEFAULT_TIMEOUT_MS = 12000;
+export const COLD_START_TIMEOUT_MS = 60000;
+
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<T> {
   const deviceId = await getDeviceId();
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: options.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      "x-device-id": deviceId,
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: options.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "x-device-id": deviceId,
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    // An abort is our own timeout firing; anything else is a genuine
+    // network failure (no connection, DNS, refused).
+    if (e?.name === "AbortError") {
+      throw new ApiError("The server is taking a while to respond", 0, true);
+    }
+    throw new ApiError(e?.message || "Couldn't reach the server", 0);
+  } finally {
+    clearTimeout(timer);
+  }
 
   const data = await response.json().catch(() => ({}));
 
@@ -36,6 +64,21 @@ async function request<T>(
   }
 
   return data as T;
+}
+
+// Cheap, unauthenticated ping. Used to start a sleeping host booting as
+// early as possible — during the splash, before any screen needs data.
+export async function warmUpBackend(timeoutMs = 4000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API_BASE_URL}/health`, { signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---- Types matching the backend's responses ----
@@ -148,7 +191,9 @@ export const api = {
     request<{ results: TmdbMovieSummary[] }>(`/movie/popular?page=${page}`),
 
   // The whole home screen in one request, enriched server-side.
-  homeFeed: () => request<HomeFeed>("/movie/home"),
+  // Takes a timeout so the caller can use a short first attempt to detect a
+  // sleeping host, then a long one while it boots.
+  homeFeed: (timeoutMs?: number) => request<HomeFeed>("/movie/home", { timeoutMs }),
   genres: () => request<{ genres: string[] }>("/movie/genres"),
 
   // Backs both the filter sheet and the watch-decision quiz.

@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Search as SearchIcon, Star } from "lucide-react-native";
-import { api, type TmdbMovieSummary } from "@/lib/api";
+import { api, ApiError, type TmdbMovieSummary } from "@/lib/api";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { sampleTrending } from "@/lib/cards";
 import { colors } from "@/lib/theme";
@@ -25,6 +25,8 @@ export default function Browse() {
   const [error, setError] = useState<string | null>(null);
   const [navigatingId, setNavigatingId] = useState<number | null>(null);
   const [usingFallback, setUsingFallback] = useState(false);
+  // A timeout means the host is likely asleep and booting, not broken.
+  const [waking, setWaking] = useState(false);
 
   const loadTrending = useCallback(async () => {
     setLoading(true);
@@ -33,10 +35,12 @@ export default function Browse() {
       const { results } = await api.trendingMovies();
       setResults(results);
       setUsingFallback(false);
+      setWaking(false);
     } catch (e: any) {
       // Fall back to the bundled sample titles so the screen stays usable
       // offline; the banner says why they're there.
       setError(e.message || "Couldn't load trending movies");
+      setWaking(e instanceof ApiError && e.timedOut);
       setResults([]);
       setUsingFallback(true);
     } finally {
@@ -51,8 +55,10 @@ export default function Browse() {
       const { results } = await api.searchMovies(term);
       setResults(results);
       setUsingFallback(false);
+      setWaking(false);
     } catch (e: any) {
       setError(e.message || "Search failed");
+      setWaking(e instanceof ApiError && e.timedOut);
       setResults([]);
       setUsingFallback(true);
     } finally {
@@ -127,7 +133,11 @@ export default function Browse() {
         // Offline: keep the sample titles on screen with an explanatory
         // banner, rather than replacing the whole tab with an error.
         <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-          <ErrorBanner message={error || "Couldn't reach Scenewise"} onRetry={retry} />
+          {waking ? (
+            <ErrorBanner variant="waking" message="Waking the server up…" />
+          ) : (
+            <ErrorBanner message={error || "Couldn't reach Scenewise"} onRetry={retry} />
+          )}
           <View className="mt-4 gap-3 px-5">
             {sampleTrending.map((m) => (
               <Pressable

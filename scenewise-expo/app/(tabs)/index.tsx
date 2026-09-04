@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -11,14 +11,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Search, SlidersHorizontal, Clock, X } from "lucide-react-native";
-import { api, type DiscoverFilters, type SpotlightRow } from "@/lib/api";
-import {
-  fromApi,
-  sampleTrending,
-  sampleLowCommitment,
-  type DisplayCard,
-} from "@/lib/cards";
+import { api, type DiscoverFilters } from "@/lib/api";
+import { fromApi, type DisplayCard } from "@/lib/cards";
 import { useOpenMovie } from "@/lib/useOpenMovie";
+import { useHomeFeed } from "@/lib/useHomeFeed";
 import { MatchRing } from "@/components/MatchRing";
 import { Tag } from "@/components/Tag";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -33,47 +29,25 @@ export default function Home() {
   const [quizOpen, setQuizOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const [trending, setTrending] = useState<DisplayCard[]>([]);
-  const [lowCommitment, setLowCommitment] = useState<DisplayCard[]>([]);
-  const [spotlight, setSpotlight] = useState<
-    (Omit<SpotlightRow, "movies"> & { movies: DisplayCard[] }) | null
-  >(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Starts on the bundled sample titles and swaps to live data when it
+  // arrives, so the screen is never blank — even while a sleeping backend
+  // boots. See lib/useHomeFeed.ts for the cold-start handling.
+  const {
+    trending,
+    lowCommitment,
+    spotlight,
+    status,
+    error,
+    usingSamples,
+    refreshing,
+    refresh,
+  } = useHomeFeed();
 
   // When set, the live rows are replaced by a single filtered row.
   const [filters, setFilters] = useState<DiscoverFilters | null>(null);
   const [filtered, setFiltered] = useState<DisplayCard[] | null>(null);
   const [filtering, setFiltering] = useState(false);
-
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const feed = await api.homeFeed();
-      setTrending(feed.trending.map(fromApi));
-      setLowCommitment(feed.lowCommitment.map(fromApi));
-      setSpotlight(
-        feed.spotlight
-          ? { ...feed.spotlight, movies: feed.spotlight.movies.map(fromApi) }
-          : null,
-      );
-    } catch (e: any) {
-      // Keep the built-in sample titles on screen rather than emptying the
-      // home page — the banner explains why they're there.
-      setError(e?.message || "Couldn't reach Scenewise");
-      setTrending(sampleTrending);
-      setLowCommitment(sampleLowCommitment);
-      setSpotlight(null);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const [filterError, setFilterError] = useState<string | null>(null);
 
   const applyFilters = async (next: DiscoverFilters) => {
     setFiltersOpen(false);
@@ -83,7 +57,7 @@ export default function Home() {
       const { results } = await api.discover(next);
       setFiltered(results.map(fromApi));
     } catch (e: any) {
-      setError(e?.message || "Couldn't apply those filters");
+      setFilterError(e?.message || "Couldn't apply those filters");
       setFiltered([]);
     } finally {
       setFiltering(false);
@@ -93,16 +67,11 @@ export default function Home() {
   const clearFilters = () => {
     setFilters(null);
     setFiltered(null);
+    setFilterError(null);
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator color={colors.primary} />
-      </SafeAreaView>
-    );
-  }
-
+  // No blocking spinner: the sample titles render immediately and are
+  // replaced in place once the live feed lands.
   return (
     <SafeAreaView className="flex-1 pt-2 bg-background">
       <ScrollView
@@ -111,10 +80,7 @@ export default function Home() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load();
-            }}
+            onRefresh={refresh}
             tintColor={colors.primary}
           />
         }
@@ -161,15 +127,12 @@ export default function Home() {
           </View>
         </View>
 
-        {error ? (
-          <ErrorBanner
-            message={error}
-            onRetry={() => {
-              setRefreshing(true);
-              load();
-            }}
-            retrying={refreshing}
-          />
+        {status === "waking" ? (
+          <ErrorBanner variant="waking" message="Waking the server up…" />
+        ) : filterError ? (
+          <ErrorBanner message={filterError} onRetry={clearFilters} />
+        ) : error ? (
+          <ErrorBanner message={error} onRetry={refresh} retrying={refreshing} />
         ) : null}
 
         <Text className="mt-5 px-5 text-sm leading-relaxed text-muted-foreground">
@@ -201,8 +164,12 @@ export default function Home() {
             {/* Trending now */}
             <View className="mt-8">
               <View className="flex-row items-baseline justify-between px-5">
-                <Text className="font-display text-lg text-foreground">Trending now</Text>
-                <Text className="text-xs text-muted-foreground">Swipe</Text>
+                <Text className="font-display text-lg text-foreground">
+                  {usingSamples ? "Sample titles" : "Trending now"}
+                </Text>
+                <Text className="text-xs text-muted-foreground">
+                  {usingSamples ? "Preview" : "Swipe"}
+                </Text>
               </View>
 
               <ScrollView

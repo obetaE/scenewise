@@ -12,6 +12,7 @@ import {
 } from "@expo-google-fonts/plus-jakarta-sans";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { getDeviceId } from "@/lib/deviceId";
+import { warmUpBackend } from "@/lib/api";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 SplashScreen.setOptions({ fade: true, duration: 250 });
@@ -33,6 +34,12 @@ export default function RootLayout() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Nudge the backend awake while the splash is still up. Free hosting
+      // suspends idle services, so starting the boot here buys the home
+      // screen a head start. Deliberately not awaited beyond its own short
+      // timeout — startup must never hang on the network.
+      warmUpBackend().catch(() => {});
+
       await Promise.all([
         // Resolving the device ID here keeps it off the critical path of the
         // first API call, which would otherwise await it mid-request.
