@@ -3,7 +3,8 @@ import Review from "../lib/models/Review.ts";
 import Movie from "../lib/models/Movie.ts";
 import requireDeviceId from "../middleware/device.middleware.ts";
 import { recalculateMovieRating } from "../lib/movieStats.ts";
-import { getMovieReviews } from "../lib/tmdb.ts";
+import { getMovieReviews, getMovieExtras } from "../lib/tmdb.ts";
+import { getByImdbId, toCriticScores } from "../lib/omdb.ts";
 import { serializeReview } from "../lib/reviewSerializer.ts";
 
 const router = express.Router();
@@ -59,7 +60,12 @@ router.get("/movie/:movieId", requireDeviceId, async (req, res) => {
       MAX_TMDB_PAGES,
     );
 
-    const [ownReviews, tmdbReviews] = await Promise.all([
+    // OMDb carries the critic scores TMDB has no equivalent for (Rotten
+    // Tomatoes, Metacritic, IMDb). It needs an IMDb id, which older cached
+    // movies predate — backfill it from TMDB the first time we need it.
+    const imdbId = movie.imdbId || (await resolveImdbId(movie));
+
+    const [ownReviews, tmdbReviews, criticScores] = await Promise.all([
       // One review per device per movie, so this stays small — no need to
       // paginate the DB side before merging.
       Review.find({ movie: req.params.movieId }).sort({ createdAt: -1 }),
@@ -69,6 +75,13 @@ router.get("/movie/:movieId", requireDeviceId, async (req, res) => {
         console.error("TMDB reviews unavailable:", error);
         return [];
       }),
+      // Supplementary and entirely optional — no OMDb key just means no
+      // critic scores, never a failed request.
+      imdbId
+        ? getByImdbId(imdbId)
+            .then(toCriticScores)
+            .catch(() => [])
+        : Promise.resolve([]),
     ]);
 
     const merged = [
@@ -80,6 +93,9 @@ router.get("/movie/:movieId", requireDeviceId, async (req, res) => {
 
     res.json({
       reviews: merged.slice((page - 1) * limit, page * limit),
+      // Scores, not written reviews — rendered as their own row so they're
+      // never mistaken for someone's opinion piece.
+      criticScores: page === 1 ? criticScores : [],
       currentPage: page,
       totalReviews,
       totalPages: Math.ceil(totalReviews / limit),
@@ -110,5 +126,20 @@ router.delete("/:reviewId", requireDeviceId, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// Older Movie documents were cached before imdbId was stored. Fetch it once
+// and persist it so this only ever costs one extra call per movie.
+async function resolveImdbId(movie: any): Promise<string | null> {
+  try {
+    const extras = await getMovieExtras(movie.tmdbId);
+    if (extras.imdbId) {
+      movie.imdbId = extras.imdbId;
+      await movie.save();
+    }
+    return extras.imdbId;
+  } catch {
+    return null;
+  }
+}
 
 export default router;

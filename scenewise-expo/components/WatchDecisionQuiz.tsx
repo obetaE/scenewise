@@ -8,40 +8,13 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
-import { X, Sparkles, ArrowRight } from "lucide-react-native";
-import { moodQuestions } from "@/lib/movies";
-import { api } from "@/lib/api";
+import { X, Sparkles, ArrowRight, ArrowLeft, RotateCcw } from "lucide-react-native";
+import { api, type DiscoverFilters } from "@/lib/api";
+import { quizQuestions, buildFilters, describeFilters, type QuizOption } from "@/lib/quiz";
 import { fromApi, sampleTrending, type DisplayCard } from "@/lib/cards";
 import { useOpenMovie } from "@/lib/useOpenMovie";
 import { MatchRing } from "./MatchRing";
 import { colors } from "@/lib/theme";
-
-// The quiz asks about mood in plain language; TMDB only understands genres
-// and runtime. These maps are the translation layer — each answer becomes
-// real discover parameters, so the picks are genuine matches rather than a
-// local re-ranking of a fixed list.
-const MOOD_GENRES: Record<string, string[]> = {
-  Cozy: ["Family", "Comedy", "Romance"],
-  Tense: ["Thriller", "Mystery"],
-  Laugh: ["Comedy"],
-  Awe: ["Science Fiction", "Adventure", "Fantasy"],
-  Emotional: ["Drama"],
-  Adrenaline: ["Action", "Thriller"],
-};
-
-const ENERGY_GENRES: Record<string, string[]> = {
-  "Wind down": ["Comedy", "Family", "Romance"],
-  Thoughtful: ["Drama", "Documentary", "Mystery"],
-  Escape: ["Fantasy", "Science Fiction", "Adventure"],
-  Alone: ["Drama", "Mystery"],
-  "With friends": ["Comedy", "Action", "Adventure"],
-};
-
-const LENGTH_MAX_RUNTIME: Record<string, number | undefined> = {
-  "Under 100 min": 100,
-  "About two hours": 130,
-  "All evening": undefined,
-};
 
 export function WatchDecisionQuiz({
   open,
@@ -50,74 +23,68 @@ export function WatchDecisionQuiz({
   open: boolean;
   onClose: () => void;
 }) {
-  const { open: openMovie, openingKey } = useOpenMovie();
+  const { open: openMovie } = useOpenMovie();
 
   const [step, setStep] = useState(0);
-  const [picks, setPicks] = useState<Record<string, string[]>>({});
+  const [answers, setAnswers] = useState<Record<string, QuizOption>>({});
   const [results, setResults] = useState<DisplayCard[] | null>(null);
+  const [usedFilters, setUsedFilters] = useState<DiscoverFilters | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const done = results !== null || loading || error !== null;
-  const q = moodQuestions[Math.min(step, moodQuestions.length - 1)]!;
-  const selected = picks[q.key] ?? [];
-  const isLastStep = step === moodQuestions.length - 1;
+  const showingResults = results !== null || loading;
+  const question = quizQuestions[step]!;
+  const isLastStep = step === quizQuestions.length - 1;
 
-  const toggle = (opt: string) =>
-    setPicks((p) => {
-      const cur = p[q.key] ?? [];
-      return {
-        ...p,
-        [q.key]: cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt],
-      };
-    });
-
-  const runQuiz = async (finalPicks: Record<string, string[]>) => {
+  const run = async (finalAnswers: Record<string, QuizOption>) => {
+    const filters = buildFilters(finalAnswers);
+    setUsedFilters(filters);
     setLoading(true);
     setError(null);
     try {
-      const genres = new Set<string>();
-      (finalPicks.mood ?? []).forEach((m) =>
-        (MOOD_GENRES[m] ?? []).forEach((g) => genres.add(g)),
-      );
-      (finalPicks.energy ?? []).forEach((e) =>
-        (ENERGY_GENRES[e] ?? []).forEach((g) => genres.add(g)),
-      );
+      let { results } = await api.discover(filters);
 
-      // Take the tightest length constraint the person chose.
-      const runtimes = (finalPicks.length ?? [])
-        .map((l) => LENGTH_MAX_RUNTIME[l])
-        .filter((v): v is number => typeof v === "number");
-      const maxRuntime = runtimes.length ? Math.min(...runtimes) : undefined;
-
-      const { results } = await api.discover({
-        genres: [...genres],
-        maxRuntime,
-        minRating: 6,
-        sortBy: "popularity.desc",
-      });
+      // A very tight combination can legitimately return nothing. Rather
+      // than a dead end, relax the rating floor once and say so.
+      if (results.length === 0 && (filters.minRating ?? 0) > 6) {
+        const relaxed = { ...filters, minRating: 6 };
+        ({ results } = await api.discover(relaxed));
+        setUsedFilters(relaxed);
+      }
       setResults(results.map(fromApi));
     } catch (e: any) {
       setError(e?.message || "Couldn't fetch recommendations");
-      // Still give them something to look at.
       setResults(sampleTrending.slice(0, 3));
     } finally {
       setLoading(false);
     }
   };
 
-  const next = () => {
+  const choose = (option: QuizOption) => {
+    const next = { ...answers, [question.key]: option };
+    setAnswers(next);
     if (isLastStep) {
-      runQuiz(picks);
+      run(next);
     } else {
       setStep((s) => s + 1);
     }
   };
 
+  const skip = () => {
+    if (isLastStep) {
+      run(answers);
+    } else {
+      setStep((s) => s + 1);
+    }
+  };
+
+  const back = () => setStep((s) => Math.max(0, s - 1));
+
   const reset = () => {
     setStep(0);
-    setPicks({});
+    setAnswers({});
     setResults(null);
+    setUsedFilters(null);
     setError(null);
     setLoading(false);
   };
@@ -143,64 +110,103 @@ export function WatchDecisionQuiz({
             <X size={18} color={colors.mutedForeground} />
           </Pressable>
 
-          {!done ? (
+          {!showingResults ? (
             <>
               <View className="flex-row items-center gap-2">
                 <Sparkles size={14} color={colors.primary} />
                 <Text className="text-xs font-sans-semibold uppercase tracking-widest text-primary">
-                  Watch decision · {step + 1}/{moodQuestions.length}
+                  Step {step + 1} of {quizQuestions.length}
                 </Text>
               </View>
-              <Text className="mt-3 font-display text-2xl text-foreground">{q.prompt}</Text>
 
-              <View className="mt-6 flex-row flex-wrap gap-2.5">
-                {q.options.map((opt) => {
-                  const on = selected.includes(opt);
-                  return (
-                    <Pressable
-                      key={opt}
-                      onPress={() => toggle(opt)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
-                      className="rounded-full border px-4 py-2.5"
-                      style={{
-                        borderColor: on ? colors.primary : colors.border,
-                        backgroundColor: on ? colors.primary : "rgba(255,255,255,0.06)",
-                      }}
-                    >
-                      <Text
-                        className="text-sm font-sans-medium"
-                        style={{ color: on ? colors.primaryForeground : colors.foreground }}
+              {/* Progress */}
+              <View className="mt-3 flex-row gap-1.5">
+                {quizQuestions.map((q, i) => (
+                  <View
+                    key={q.key}
+                    className="h-1 flex-1 rounded-full"
+                    style={{
+                      backgroundColor:
+                        i <= step ? colors.primary : "rgba(255,255,255,0.12)",
+                    }}
+                  />
+                ))}
+              </View>
+
+              <Text className="mt-4 font-display text-2xl text-foreground">
+                {question.prompt}
+              </Text>
+              <Text className="mt-1 text-xs text-muted-foreground">{question.helper}</Text>
+
+              <ScrollView style={{ maxHeight: 300 }} className="mt-5">
+                <View className="gap-2.5">
+                  {question.options.map((opt) => {
+                    const active = answers[question.key]?.label === opt.label;
+                    return (
+                      <Pressable
+                        key={opt.label}
+                        onPress={() => choose(opt)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        className="flex-row items-center justify-between rounded-2xl border px-4 py-3.5 active:opacity-80"
+                        style={{
+                          borderColor: active ? colors.primary : colors.border,
+                          backgroundColor: active
+                            ? "rgba(217,185,106,0.12)"
+                            : "rgba(255,255,255,0.04)",
+                        }}
                       >
-                        {opt}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                        <View className="min-w-0 flex-1">
+                          <Text className="text-sm font-sans-semibold text-foreground">
+                            {opt.label}
+                          </Text>
+                          {opt.hint ? (
+                            <Text className="mt-0.5 text-[11px] text-muted-foreground">
+                              {opt.hint}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <ArrowRight size={15} color={colors.mutedForeground} />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
 
-              <Pressable
-                onPress={next}
-                disabled={selected.length === 0}
-                accessibilityRole="button"
-                className="mt-8 flex-row items-center justify-center gap-2 rounded-full bg-primary px-5 py-3.5"
-                style={{ opacity: selected.length === 0 ? 0.35 : 1 }}
-              >
-                <Text className="text-sm font-sans-semibold text-primary-foreground">
-                  {isLastStep ? "See my pick" : "Continue"}
-                </Text>
-                <ArrowRight size={16} color={colors.primaryForeground} />
-              </Pressable>
+              <View className="mt-5 flex-row items-center justify-between">
+                {step > 0 ? (
+                  <Pressable
+                    onPress={back}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    className="flex-row items-center gap-1.5 active:opacity-70"
+                  >
+                    <ArrowLeft size={14} color={colors.mutedForeground} />
+                    <Text className="text-xs font-sans-medium text-muted-foreground">Back</Text>
+                  </Pressable>
+                ) : (
+                  <View />
+                )}
+                <Pressable onPress={skip} hitSlop={8} accessibilityRole="button">
+                  <Text className="text-xs font-sans-medium text-muted-foreground">
+                    {isLastStep ? "Skip & see picks" : "Skip"}
+                  </Text>
+                </Pressable>
+              </View>
             </>
           ) : (
             <>
               <Text className="text-xs font-sans-semibold uppercase tracking-widest text-accent">
-                Spoiler-free pick
+                Your picks
               </Text>
-              <Text className="mt-3 font-display text-2xl text-foreground">
-                Watch this tonight
+              <Text className="mt-2 font-display text-2xl text-foreground">
+                {loading ? "Finding your match…" : "Watch this tonight"}
               </Text>
-
+              {usedFilters && !loading ? (
+                <Text className="mt-1 text-xs text-muted-foreground">
+                  {describeFilters(usedFilters)}
+                </Text>
+              ) : null}
               {error ? (
                 <Text className="mt-2 text-xs text-destructive">
                   {error} — showing sample titles instead.
@@ -208,36 +214,32 @@ export function WatchDecisionQuiz({
               ) : null}
 
               {loading ? (
-                <View className="items-center py-12">
+                <View className="items-center py-14">
                   <ActivityIndicator color={colors.primary} />
-                  <Text className="mt-3 text-xs text-muted-foreground">
-                    Finding your match…
-                  </Text>
                 </View>
               ) : (
-                <ScrollView className="mt-5" style={{ maxHeight: 320 }}>
+                <ScrollView className="mt-4" style={{ maxHeight: 330 }}>
                   <View className="gap-3">
                     {(results ?? []).length === 0 ? (
                       <View className="items-center rounded-2xl border border-dashed border-border py-10">
                         <Text className="px-8 text-center text-sm text-muted-foreground">
-                          Nothing matched that combination. Try fewer answers.
+                          Nothing matched that combination. Try starting over with
+                          looser answers.
                         </Text>
                       </View>
                     ) : (
-                      (results ?? []).slice(0, 5).map((card, i) => (
+                      (results ?? []).slice(0, 6).map((card, i) => (
                         <Pressable
                           key={card.key}
                           onPress={() => {
                             handleClose();
                             openMovie(card);
                           }}
-                          disabled={openingKey === card.key}
                           accessibilityRole="button"
                           accessibilityLabel={`${card.title}, ${card.year}`}
-                          className="flex-row items-center gap-3 rounded-2xl border p-3"
+                          className="flex-row items-center gap-3 rounded-2xl border p-3 active:opacity-80"
                           style={{
-                            borderColor:
-                              i === 0 ? "rgba(217,185,106,0.4)" : colors.border,
+                            borderColor: i === 0 ? "rgba(217,185,106,0.4)" : colors.border,
                             backgroundColor:
                               i === 0
                                 ? "rgba(217,185,106,0.05)"
@@ -246,16 +248,18 @@ export function WatchDecisionQuiz({
                         >
                           <Image source={card.poster} className="h-16 w-11 rounded-lg" />
                           <View className="min-w-0 flex-1">
+                            {i === 0 ? (
+                              <Text className="text-[10px] font-sans-semibold uppercase tracking-widest text-primary">
+                                Top pick
+                              </Text>
+                            ) : null}
                             <Text
                               className="text-sm font-sans-semibold text-foreground"
                               numberOfLines={1}
                             >
                               {card.title}
                             </Text>
-                            <Text
-                              className="text-xs text-muted-foreground"
-                              numberOfLines={1}
-                            >
+                            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
                               {[card.runtimeLabel, card.year, card.certification]
                                 .filter(Boolean)
                                 .join(" · ")}
@@ -272,8 +276,9 @@ export function WatchDecisionQuiz({
               <Pressable
                 onPress={reset}
                 accessibilityRole="button"
-                className="mt-6 items-center rounded-full border border-border py-3 active:opacity-70"
+                className="mt-5 flex-row items-center justify-center gap-2 rounded-full border border-border py-3 active:opacity-70"
               >
+                <RotateCcw size={14} color={colors.mutedForeground} />
                 <Text className="text-sm font-sans-medium text-muted-foreground">
                   Start over
                 </Text>

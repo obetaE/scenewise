@@ -160,7 +160,7 @@ export default function TitleDetail() {
         {/* Related */}
         <View className="mt-7">
           <Text className="px-5 text-sm font-sans-semibold text-foreground">
-            If this isn't it
+            If this isn&apos;t it
           </Text>
           <ScrollView
             horizontal
@@ -202,7 +202,7 @@ export default function TitleDetail() {
         <Pressable className="flex-row items-center justify-center gap-2 rounded-full bg-primary py-3.5">
           <Play size={15} color="#3a2e16" />
           <Text className="text-sm font-sans-semibold text-primary-foreground">
-            I'm watching this
+            I&apos;m watching this
           </Text>
         </Pressable>
       </SafeAreaView>

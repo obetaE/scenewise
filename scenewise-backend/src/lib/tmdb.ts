@@ -47,6 +47,12 @@ async function getGenreMap(): Promise<Record<number, string>> {
   return genreCache!;
 }
 
+// The genre list, for pickers in the UI. Cached by getGenreMap already.
+export async function listGenres(): Promise<string[]> {
+  const map = await getGenreMap();
+  return Object.values(map).sort();
+}
+
 export interface TmdbMovieSummary {
   tmdbId: number;
   title: string;
@@ -97,6 +103,7 @@ export async function getPopularMovies(page = 1): Promise<TmdbMovieSummary[]> {
 
 export interface TmdbMovieDetail extends TmdbMovieSummary {
   runtime: number | null;
+  imdbId: string | null;
 }
 
 export async function getMovieDetail(tmdbId: number): Promise<TmdbMovieDetail> {
@@ -111,6 +118,7 @@ export async function getMovieDetail(tmdbId: number): Promise<TmdbMovieDetail> {
     genres: (raw.genres || []).map((g: { name: string }) => g.name),
     tmdbVoteAverage: raw.vote_average || 0,
     runtime: raw.runtime ?? null,
+    imdbId: raw.imdb_id || null,
   };
 }
 
@@ -215,6 +223,7 @@ export async function getWatchProviders(tmdbId: number, region = "US") {
 export interface TmdbMovieExtras {
   runtime: number | null;
   certification: string | null;
+  imdbId: string | null;
   trailerKey: string | null; // YouTube video key
   trailerName: string | null;
 }
@@ -266,6 +275,7 @@ export async function getMovieExtras(tmdbId: number, region = "US"): Promise<Tmd
   const trailer = pickTrailer(raw.videos?.results || []);
   return extrasCache.set(key, {
     runtime: raw.runtime ?? null,
+    imdbId: raw.imdb_id || null,
     certification: pickCertification(raw.release_dates?.results || [], region),
     trailerKey: trailer?.key ?? null,
     trailerName: trailer?.name ?? null,
@@ -300,6 +310,70 @@ async function enrich(summaries: TmdbMovieSummary[], region: string): Promise<Tm
 export interface HomeFeed {
   trending: TmdbMovieCard[];
   lowCommitment: TmdbMovieCard[];
+  spotlight: { key: string; title: string; subtitle: string; movies: TmdbMovieCard[] };
+}
+
+// The home screen's middle row rotates through these so the app always has
+// something new to scroll, rather than showing the same trending list every
+// visit. Each is a real TMDB discover query, not a curated hardcoded list.
+const CURRENT_YEAR = new Date().getFullYear();
+
+const COLLECTIONS: {
+  key: string;
+  title: string;
+  subtitle: string;
+  params: DiscoverParams;
+}[] = [
+  {
+    key: "box-office",
+    title: "Box office hits",
+    subtitle: "The biggest earners of all time.",
+    params: { sortBy: "revenue.desc", minVotes: 1000 },
+  },
+  {
+    key: "new-and-good",
+    title: "New and actually good",
+    subtitle: "Recent releases that landed well.",
+    params: {
+      sortBy: "popularity.desc",
+      minYear: CURRENT_YEAR - 1,
+      minRating: 6.5,
+      minVotes: 150,
+    },
+  },
+  {
+    key: "classics",
+    title: "All-time classics",
+    subtitle: "The ones that stayed great.",
+    params: {
+      sortBy: "vote_average.desc",
+      maxYear: 2005,
+      minRating: 8,
+      minVotes: 3000,
+    },
+  },
+  {
+    key: "crowd-pleasers",
+    title: "Crowd-pleasers",
+    subtitle: "Loved by the most people.",
+    params: { sortBy: "vote_count.desc", minRating: 7 },
+  },
+  {
+    key: "hidden-gems",
+    title: "Hidden gems",
+    subtitle: "Highly rated, far less watched.",
+    params: { sortBy: "vote_average.desc", minRating: 7.5, minVotes: 300 },
+  },
+];
+
+// Fisher-Yates, so a row isn't in the same order every time it comes round.
+function shuffle<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
 }
 
 // Enriching the feed costs ~24 TMDB calls and can take 20s cold, so the
@@ -353,6 +427,17 @@ async function buildHomeFeed(region: string): Promise<HomeFeed> {
     enrich(popularRaw.slice(0, 12), region),
   ]);
 
+  // Rotate the spotlight in step with the cache window, so it changes as the
+  // feed refreshes rather than flipping on every request.
+  const rotation = Math.floor(Date.now() / (10 * 60 * 1000)) % COLLECTIONS.length;
+  const collection = COLLECTIONS[rotation]!;
+  let spotlightMovies: TmdbMovieCard[] = [];
+  try {
+    spotlightMovies = shuffle(await discoverMovies(collection.params, region)).slice(0, 10);
+  } catch (error) {
+    console.error("Spotlight collection failed:", error);
+  }
+
   const seen = new Set<number>();
   const lowCommitment = [...trending, ...popularPool]
     .filter((m) => {
@@ -364,7 +449,16 @@ async function buildHomeFeed(region: string): Promise<HomeFeed> {
     .sort((a, b) => (a.runtime || 0) - (b.runtime || 0))
     .slice(0, 6);
 
-  return { trending, lowCommitment };
+  return {
+    trending: shuffle(trending),
+    lowCommitment,
+    spotlight: {
+      key: collection.key,
+      title: collection.title,
+      subtitle: collection.subtitle,
+      movies: spotlightMovies,
+    },
+  };
 }
 
 // ---- Discover ----
@@ -380,6 +474,9 @@ export interface DiscoverParams {
   certification?: string;
   sortBy?: string;
   page?: number;
+  minYear?: number;
+  maxYear?: number;
+  minVotes?: number;
 }
 
 async function getGenreIdMap(): Promise<Record<string, number>> {
@@ -398,8 +495,13 @@ export async function discoverMovies(
     include_adult: "false",
     page: String(params.page || 1),
     // Without a vote floor, discover surfaces obscure titles with a single
-    // 10/10 vote, which makes the quiz results look broken.
-    "vote_count.gte": "150",
+    // 10/10 vote, which makes the quiz results look broken. Sorting by
+    // rating needs a much higher floor than sorting by popularity, where
+    // popularity already implies a real audience.
+    "vote_count.gte": String(
+      params.minVotes ??
+        ((params.sortBy || "").startsWith("vote_average") ? 2000 : 150),
+    ),
   };
 
   if (params.genres?.length) {
@@ -410,6 +512,8 @@ export async function discoverMovies(
     // TMDB treats a comma as OR here, which is what we want for moods.
     if (ids.length) query.with_genres = ids.join(",");
   }
+  if (params.minYear) query["primary_release_date.gte"] = `${params.minYear}-01-01`;
+  if (params.maxYear) query["primary_release_date.lte"] = `${params.maxYear}-12-31`;
   if (params.maxRuntime) query["with_runtime.lte"] = String(params.maxRuntime);
   if (params.minRuntime) query["with_runtime.gte"] = String(params.minRuntime);
   if (params.minRating) query["vote_average.gte"] = String(params.minRating);

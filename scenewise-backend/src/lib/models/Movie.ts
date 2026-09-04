@@ -35,6 +35,12 @@ const movieSchema = new mongoose.Schema(
     runtime: {
       type: Number, // minutes
     },
+    // IMDb id, used to look this title up in OMDb for critic scores.
+    imdbId: {
+      type: String,
+      default: null,
+      index: true,
+    },
     tmdbVoteAverage: {
       type: Number, // TMDB's own aggregate rating, informational only
       default: 0,

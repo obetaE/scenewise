@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Search, SlidersHorizontal, Clock, X } from "lucide-react-native";
-import { api, type DiscoverFilters } from "@/lib/api";
+import { api, type DiscoverFilters, type SpotlightRow } from "@/lib/api";
 import {
   fromApi,
   sampleTrending,
@@ -35,6 +35,9 @@ export default function Home() {
 
   const [trending, setTrending] = useState<DisplayCard[]>([]);
   const [lowCommitment, setLowCommitment] = useState<DisplayCard[]>([]);
+  const [spotlight, setSpotlight] = useState<
+    (Omit<SpotlightRow, "movies"> & { movies: DisplayCard[] }) | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,12 +53,18 @@ export default function Home() {
       const feed = await api.homeFeed();
       setTrending(feed.trending.map(fromApi));
       setLowCommitment(feed.lowCommitment.map(fromApi));
+      setSpotlight(
+        feed.spotlight
+          ? { ...feed.spotlight, movies: feed.spotlight.movies.map(fromApi) }
+          : null,
+      );
     } catch (e: any) {
       // Keep the built-in sample titles on screen rather than emptying the
       // home page — the banner explains why they're there.
       setError(e?.message || "Couldn't reach Scenewise");
       setTrending(sampleTrending);
       setLowCommitment(sampleLowCommitment);
+      setSpotlight(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -213,6 +222,35 @@ export default function Home() {
               </ScrollView>
             </View>
 
+            {/* Rotating collection — box office hits, classics, new releases… */}
+            {spotlight && spotlight.movies.length > 0 ? (
+              <View className="mt-9">
+                <View className="px-5">
+                  <Text className="font-display text-lg text-foreground">
+                    {spotlight.title}
+                  </Text>
+                  <Text className="mt-1 text-xs text-muted-foreground">
+                    {spotlight.subtitle}
+                  </Text>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}
+                  className="mt-4"
+                >
+                  {spotlight.movies.map((m) => (
+                    <SpotlightCard
+                      key={m.key}
+                      card={m}
+                      busy={openingKey === m.key}
+                      onPress={() => open(m)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+
             {/* Low-commitment picks */}
             <View className="mt-9 px-5">
               <Text className="font-display text-lg text-foreground">
@@ -299,6 +337,49 @@ function FilteredSection({
         </View>
       )}
     </View>
+  );
+}
+
+function SpotlightCard({
+  card,
+  busy,
+  onPress,
+}: {
+  card: DisplayCard;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={busy}
+      accessibilityRole="button"
+      accessibilityLabel={`${card.title}, ${card.year}`}
+      className="w-[132px]"
+      style={{ opacity: busy ? 0.6 : 1 }}
+    >
+      <View className="overflow-hidden rounded-2xl" style={{ aspectRatio: 2 / 3 }}>
+        <Image source={card.poster} className="h-full w-full" resizeMode="cover" />
+        {busy && (
+          <View className="absolute inset-0 items-center justify-center bg-black/40">
+            <ActivityIndicator color={colors.primary} size="small" />
+          </View>
+        )}
+        {card.score != null && (
+          <View className="absolute left-2 top-2 rounded-full bg-black/65 px-2 py-0.5">
+            <Text className="text-[10px] font-sans-semibold text-primary">
+              {card.score}
+            </Text>
+          </View>
+        )}
+      </View>
+      <Text className="mt-2 text-xs font-sans-medium text-foreground" numberOfLines={1}>
+        {card.title}
+      </Text>
+      <Text className="mt-0.5 text-[11px] text-muted-foreground" numberOfLines={1}>
+        {[card.year, card.runtimeLabel].filter(Boolean).join(" · ")}
+      </Text>
+    </Pressable>
   );
 }
 

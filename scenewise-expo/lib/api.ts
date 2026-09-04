@@ -75,14 +75,33 @@ export type MovieCard = TmdbMovieSummary & {
   certification: string | null;
 };
 
+export type SpotlightRow = {
+  key: string;
+  title: string;
+  subtitle: string;
+  movies: MovieCard[];
+};
+
 export type HomeFeed = {
   trending: MovieCard[];
   lowCommitment: MovieCard[];
+  spotlight: SpotlightRow;
+};
+
+// Critic scores from OMDb (Rotten Tomatoes, Metacritic, IMDb). These are
+// scores, not written reviews — no free API exposes RT's review prose.
+export type CriticScore = {
+  source: "rotten_tomatoes" | "metacritic" | "imdb";
+  label: string;
+  score: number; // normalised 0-100
+  display: string; // as the outlet expresses it, e.g. "79%"
+  votes: number | null;
 };
 
 export type MovieExtras = {
   runtime: number | null;
   certification: string | null;
+  imdbId: string | null;
   trailerKey: string | null;
   trailerName: string | null;
 };
@@ -94,6 +113,8 @@ export type DiscoverFilters = {
   minRating?: number;
   certification?: string;
   sortBy?: string;
+  minYear?: number;
+  maxYear?: number;
 };
 
 // One shape for both sources: reviews written in this app and reviews
@@ -128,6 +149,7 @@ export const api = {
 
   // The whole home screen in one request, enriched server-side.
   homeFeed: () => request<HomeFeed>("/movie/home"),
+  genres: () => request<{ genres: string[] }>("/movie/genres"),
 
   // Backs both the filter sheet and the watch-decision quiz.
   discover: (filters: DiscoverFilters) => {
@@ -138,6 +160,8 @@ export const api = {
     if (filters.minRating) q.set("minRating", String(filters.minRating));
     if (filters.certification) q.set("certification", filters.certification);
     if (filters.sortBy) q.set("sortBy", filters.sortBy);
+    if (filters.minYear) q.set("minYear", String(filters.minYear));
+    if (filters.maxYear) q.set("maxYear", String(filters.maxYear));
     return request<{ results: MovieCard[] }>(`/movie/discover?${q.toString()}`);
   },
 
@@ -160,7 +184,7 @@ export const api = {
       body: { rating, text, displayName },
     }),
   movieReviews: (movieId: string, page = 1) =>
-    request<{ reviews: Review[]; totalReviews: number }>(
+    request<{ reviews: Review[]; totalReviews: number; criticScores: CriticScore[] }>(
       `/review/movie/${movieId}?page=${page}`,
     ),
   deleteReview: (reviewId: string) =>

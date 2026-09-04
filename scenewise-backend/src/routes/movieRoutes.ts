@@ -10,7 +10,9 @@ import {
   getHomeFeed,
   discoverMovies,
   getMovieExtras,
+  listGenres,
 } from "../lib/tmdb.ts";
+import { getByImdbId } from "../lib/omdb.ts";
 
 const router = express.Router();
 
@@ -66,6 +68,16 @@ router.get("/home", requireDeviceId, async (req, res) => {
   }
 });
 
+// GET /api/movie/genres — the genre list backing the profile picker.
+router.get("/genres", requireDeviceId, async (_req, res) => {
+  try {
+    res.json({ genres: await listGenres() });
+  } catch (error) {
+    console.error("Error listing genres:", error);
+    res.status(502).json({ message: "Genres are temporarily unavailable" });
+  }
+});
+
 // GET /api/movie/discover?genres=Comedy,Drama&maxRuntime=100&minRating=6
 // Backs the filter sheet and the watch-decision quiz.
 router.get("/discover", requireDeviceId, async (req, res) => {
@@ -81,6 +93,9 @@ router.get("/discover", requireDeviceId, async (req, res) => {
       certification: q.certification ? String(q.certification) : undefined,
       sortBy: q.sortBy ? String(q.sortBy) : undefined,
       page: q.page ? Number(q.page) : undefined,
+      minYear: q.minYear ? Number(q.minYear) : undefined,
+      maxYear: q.maxYear ? Number(q.maxYear) : undefined,
+      minVotes: q.minVotes ? Number(q.minVotes) : undefined,
     });
 
     res.json({ results });
@@ -109,6 +124,7 @@ async function findOrCreateMovie(tmdbId: number) {
     genres: detail.genres,
     runtime: detail.runtime,
     tmdbVoteAverage: detail.tmdbVoteAverage,
+    imdbId: detail.imdbId,
   });
   return movie;
 }
@@ -136,6 +152,19 @@ router.get("/:id", requireDeviceId, async (req, res) => {
     if (!movie) return res.status(404).json({ message: "Movie not found" });
 
     const likedByMe = movie.likedBy.includes(req.deviceId!);
+
+    // TMDB stays authoritative. OMDb is consulted only to fill fields TMDB
+    // genuinely left empty — never to override something TMDB provided.
+    const needsOverview = !movie.overview;
+    const needsRuntime = !movie.runtime;
+    if ((needsOverview || needsRuntime) && movie.imdbId) {
+      const omdb = await getByImdbId(movie.imdbId).catch(() => null);
+      if (omdb) {
+        if (needsOverview && omdb.plot) movie.overview = omdb.plot;
+        if (needsRuntime && omdb.runtime) movie.runtime = omdb.runtime;
+        await movie.save().catch(() => {});
+      }
+    }
 
     res.json({ movie, likedByMe });
   } catch (error) {

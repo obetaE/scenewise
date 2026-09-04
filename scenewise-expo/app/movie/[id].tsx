@@ -12,10 +12,18 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ArrowLeft, Heart, Star, ExternalLink, Play } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
-import { api, type Movie, type Review, type ShelfEntry, type MovieExtras } from "@/lib/api";
+import {
+  api,
+  type Movie,
+  type Review,
+  type ShelfEntry,
+  type MovieExtras,
+  type CriticScore,
+} from "@/lib/api";
 import { Tag } from "@/components/Tag";
 import { RatingStars } from "@/components/RatingStars";
 import { ReviewCard } from "@/components/ReviewCard";
+import { CriticScores } from "@/components/CriticScores";
 
 const SHELF_LABELS: Record<ShelfEntry["status"], string> = {
   want_to_watch: "Want to watch",
@@ -31,6 +39,7 @@ export default function MovieDetail() {
   const [likedByMe, setLikedByMe] = useState(false);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [totalReviews, setTotalReviews] = useState(0);
+  const [criticScores, setCriticScores] = useState<CriticScore[]>([]);
   const [reviewPage, setReviewPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
   const [shelfStatus, setShelfStatus] = useState<ShelfEntry["status"] | null>(null);
@@ -51,14 +60,13 @@ export default function MovieDetail() {
     if (!id) return;
     setLoading(true);
     try {
-      const [{ movie, likedByMe }, { reviews, totalReviews }] = await Promise.all([
-        api.getMovie(id),
-        api.movieReviews(id),
-      ]);
+      const [{ movie, likedByMe }, { reviews, totalReviews, criticScores }] =
+        await Promise.all([api.getMovie(id), api.movieReviews(id)]);
       setMovie(movie);
       setLikedByMe(likedByMe);
       setReviews(reviews);
       setTotalReviews(totalReviews);
+      setCriticScores(criticScores || []);
       setReviewPage(1);
 
       // Providers and extras (trailer, certification) are nice-to-haves —
@@ -333,6 +341,8 @@ export default function MovieDetail() {
             </Pressable>
           </View>
         </View>
+
+        <CriticScores scores={criticScores} />
 
         {/* Reviews list */}
         <View className="mt-7 px-5">
