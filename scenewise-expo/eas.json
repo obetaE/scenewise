@@ -20,7 +20,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://REPLACE-WITH-YOUR-BACKEND-URL/api"
+        "EXPO_PUBLIC_API_BASE_URL": "https://scenewise.onrender.com/api"
       }
     },
     "production": {
@@ -29,7 +29,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://REPLACE-WITH-YOUR-BACKEND-URL/api"
+        "EXPO_PUBLIC_API_BASE_URL": "https://scenewise.onrender.com/api"
       }
     }
   },
