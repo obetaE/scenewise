@@ -1,0 +1,30 @@
+# Files EAS Build should NOT upload.
+#
+# The Expo app lives in a subfolder of this repo, so `eas build` archives the
+# whole repository. The backend isn't part of the mobile build, and its
+# node_modules alone is ~24 MB — excluding it keeps the upload small.
+#
+# Note: when this file exists, EAS uses it instead of .gitignore, so the
+# usual ignores are repeated here.
+
+# Backend — deployed separately on Render
+scenewise-backend/
+
+# Dependencies and build output
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+
+# Editor / OS / tooling noise
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
