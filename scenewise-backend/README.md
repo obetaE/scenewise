@@ -41,13 +41,83 @@ Reuses your existing MongoDB Atlas cluster (same `MONGO_URI` from your book
 app's `.env`) but connects to its own database, named `scenewise` — so this
 app's collections never mix with the book app's.
 
+## Keeping the free tier awake (cron)
+
+Render's free instances sleep after ~15 minutes without traffic and then take
+30-50s to boot on the next request. MongoDB Atlas also pauses free clusters
+that sit idle. `/api/cron/keep-alive` solves both at once — call it from an
+external scheduler every ~10 minutes.
+
+It isn't just a ping. Each run does genuine database work, so Atlas sees real
+read *and* write activity:
+
+1. Updates a single `heartbeat` document (last run, total runs, caller).
+2. Reads a count from the `movies` collection.
+3. Inserts one `cronrun` log document.
+4. Deletes `cronrun` documents older than 7 days.
+
+Nothing user-facing is touched — movies, reviews, likes and shelves are never
+written by this route.
+
+**Auth.** Set `CRON_SECRET` in `.env` and in Render's environment variables,
+then send it as an `x-cron-secret` header (an `Authorization: Bearer <secret>`
+header works too). Without the header the route returns 401; if `CRON_SECRET`
+isn't set at all, the route is disabled (503) rather than left open. The
+comparison is timing-safe.
+
+```bash
+curl -H "x-cron-secret: $CRON_SECRET" \
+  "https://scenewise.onrender.com/api/cron/keep-alive?source=manual"
+```
+
+**The schedule is built in.** Unlike Vercel, Render doesn't run your cron for
+you — its Cron Jobs are a separate paid service, and a plain deploy only
+restarts the server. So the timer lives in the app itself
+(`lib/keepAlive.ts`): it starts with the server, does the database work every
+10 minutes, and then makes an HTTP request to the service's own public URL.
+
+That self-request matters. Render decides whether to sleep based on *inbound*
+traffic, and a call to the public URL arrives through Render's load balancer,
+so it counts — an internal timer alone would keep the database warm but not
+the instance. Render provides `RENDER_EXTERNAL_URL` automatically; locally
+there's no public URL, so only the database half runs.
+
+Nothing to set up: deploy with `CRON_SECRET` set and it runs.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CRON_SECRET` | — | Required. Protects the routes and signs the self-ping. |
+| `KEEP_ALIVE_DISABLED` | `false` | `true` turns the built-in scheduler off. |
+| `KEEP_ALIVE_INTERVAL_MS` | `600000` | How often it runs (10 minutes). |
+| `KEEP_ALIVE_FIRST_DELAY_MS` | `30000` | Wait before the first run after boot. |
+
+**The honest limit.** A timer inside the process can't run while the process is
+asleep. If the instance does sleep — a deploy, a crash, a missed tick — the
+next real visitor wakes it and the schedule resumes. For a portfolio app
+that's a fine trade. If you ever want a guarantee, point a free external
+scheduler ([cron-job.org](https://cron-job.org), or GitHub Actions on a
+`schedule:` trigger) at `/api/cron/keep-alive` with the `x-cron-secret`
+header; the endpoint is there for exactly that, and both can run together.
+
+**On free-tier hours.** Render's free plan includes 750 instance-hours a
+month, and a month is ~730 hours. Keeping one service awake around the clock
+uses most of that allowance, which is fine for a single service but worth
+knowing if you host several.
+
+`GET /api/cron/status` (same secret) reports the last run without writing
+anything — handy for checking the scheduler is actually firing.
+
 ## API surface
 
 All routes require an `x-device-id` header (any string ≥ 8 characters —
-the frontend generates a UUID automatically, see its `lib/deviceId.ts`).
+the frontend generates a UUID automatically, see its `lib/deviceId.ts`), apart
+from `/api/health` and `/api/cron/*`.
 
 | Method | Route | What it does |
 |---|---|---|
+| GET | `/api/health` | Public. Server status + how much OMDb budget is left. |
+| GET/POST | `/api/cron/keep-alive` | Keep-alive for Render + Atlas. Needs `x-cron-secret`. |
+| GET | `/api/cron/status` | Last keep-alive run. Needs `x-cron-secret`. |
 | GET | `/api/movie/search?q=dune` | Live TMDB search. Doesn't touch the DB. |
 | GET | `/api/movie/trending` | This week's trending movies from TMDB. |
 | GET | `/api/movie/popular?page=1` | TMDB's popular list. |

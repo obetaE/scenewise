@@ -6,6 +6,8 @@ import movieRoutes from "./routes/movieRoutes.ts";
 import reviewRoutes from "./routes/reviewRoutes.ts";
 import shelfRoutes from "./routes/shelfRoutes.ts";
 import profileRoutes from "./routes/profileRoutes.ts";
+import cronRoutes from "./routes/cronRoutes.ts";
+import { startKeepAliveScheduler } from "./lib/keepAlive.ts";
 import { connectDB } from "./lib/config/db.ts";
 import { isOmdbConfigured, omdbBudgetRemaining } from "./lib/omdb.ts";
 
@@ -31,8 +33,12 @@ app.use("/api/movie", movieRoutes);
 app.use("/api/review", reviewRoutes);
 app.use("/api/shelf", shelfRoutes);
 app.use("/api/profile", profileRoutes);
+// Keep-alive for the free Render instance + MongoDB Atlas. Needs CRON_SECRET.
+app.use("/api/cron", cronRoutes);
 
 app.listen(PORT, () => {
   console.log(`Scenewise backend running on port ${PORT}`);
   connectDB();
+  // Built-in cron: keeps the Render instance awake and MongoDB Atlas active.
+  startKeepAliveScheduler();
 });
